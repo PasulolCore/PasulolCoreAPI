@@ -1,0 +1,6 @@
+fastapi
+pymongo
+pydantic
+pydantic[email]
+python-decouple
+uvicorn
