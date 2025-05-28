@@ -4,6 +4,8 @@ from pydantic import BaseModel, EmailStr
 from bson.objectid import ObjectId
 from decouple import config
 from fastapi.routing import APIRouter
+from fastapi.middleware.cors import CORSMiddleware
+
 # Load environment variables
 MONGO_URI = config("MONGO_URI", default="mongodb://localhost:27017/")
 MONGO_DB_NAME = config("MONGO_DB_NAME", default="PasulolCoreAPI")
@@ -35,6 +37,15 @@ class Statistics(BaseModel):
 
 app = FastAPI(swagger_ui_parameters={"syntaxHighlight": False})
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
+)
+
 # MongoDB setup
 client = MongoClient(MONGO_URI)
 db = client[MONGO_DB_NAME]
@@ -42,7 +53,7 @@ results_collection = db[MONGO_DB_COLLECTION]
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the MBTI API!"}
+    return {"message": "Welcome to the PasulolCoreAPI!"}
 
 result_router = APIRouter()
 
