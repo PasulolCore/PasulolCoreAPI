@@ -107,7 +107,7 @@ def get_result_by_id(result_id: str):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid ID format")
 
-@result_router.post("/", tags=["Results"])
+@result_router.post("/create", tags=["Results"])
 def create_result(result: Result):
     # Check if the Email already exists
     existing_result = results_collection.find_one({"email": result.email})
@@ -117,30 +117,6 @@ def create_result(result: Result):
     result_dict = result.dict()  # Convert Pydantic model to dictionary
     inserted_result = results_collection.insert_one(result_dict)
     return {"id": str(inserted_result.inserted_id), "message": "Result created successfully"}
-
-@result_router.delete("/{result_id}", tags=["Results"])
-def delete_result(result_id: str):
-    try:
-        delete_result = results_collection.delete_one({"_id": ObjectId(result_id)})
-        if delete_result.deleted_count == 0:
-            raise HTTPException(status_code=404, detail="Result not found")
-        return {"message": "Result deleted successfully"}
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid ID format")
-
-@result_router.put("/{result_id}", tags=["Results"])
-def update_result(result_id: str, updated_result: Result):
-    try:
-        update_data = updated_result.dict()
-        update_result = results_collection.update_one(
-            {"_id": ObjectId(result_id)},
-            {"$set": update_data}
-        )
-        if update_result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="Result not found")
-        return {"message": "Result updated successfully"}
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid ID format")
 
 # Include the router in the main app
 app.include_router(result_router, prefix="/result")
