@@ -4,3 +4,4 @@ pydantic
 pydantic[email]
 python-decouple
 uvicorn
+requests

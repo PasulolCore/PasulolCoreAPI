@@ -145,7 +145,27 @@ def update_result(result_id: str, updated_result: Result):
 # Include the router in the main app
 app.include_router(result_router, prefix="/result")
 
+import threading
+import requests
+import time
+def log_api_results():
+    while True:
+        try:
+            response = requests.get("https://pasulolcoreapi.onrender.com/")
+            if response.status_code == 200:
+                print("API Response:", response.json())
+            else:
+                print(f"Failed to fetch API data. Status code: {response.status_code}")
+        except Exception as e:
+            print(f"Error occurred while calling API: {e}")
+        time.sleep(360) # 6 minutes
+
 if __name__ == "__main__":
+    # Start the API logging in a separate thread
+    api_logging_thread = threading.Thread(target=log_api_results, daemon=True)
+    api_logging_thread.start()
+
     import uvicorn
     from fastapi.routing import APIRouter
+    # Run the FastAPI application
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
