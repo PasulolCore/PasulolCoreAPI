@@ -52,7 +52,7 @@ app = FastAPI(swagger_ui_parameters={"syntaxHighlight": False})
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins= [UI_URL],  # Allow requests from the UI URL
+    allow_origins= ["*"],  # Allow requests from the UI URL and localhost
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods
     allow_headers=["*"],  # Allow all headers
@@ -211,11 +211,6 @@ def verify_email(email: EmailStr, token: str, result_id: str):
 
 @result_router.post("/create", tags=["Results"])
 def create_result(result: Result):
-    # Check if the Email already exists
-    existing_result = results_collection.find_one({"email": result.email})
-    if existing_result:
-        raise HTTPException(status_code=400, detail="Email already exists")
-
     result_dict = result.dict()  # Convert Pydantic model to dictionary
     inserted_result = results_collection.insert_one(result_dict)
     return {"id": str(inserted_result.inserted_id), "message": "Result created successfully"}
