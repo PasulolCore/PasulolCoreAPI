@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pymongo import MongoClient
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
+from pydantic.json_schema import SkipJsonSchema
 from bson.objectid import ObjectId
 from decouple import config
 from fastapi.routing import APIRouter
@@ -23,8 +24,8 @@ SMTP_PASSWORD = config("SMTP_PASSWORD", default="your-email-password")
 class Result(BaseModel):
     _id: ObjectId
     accept_email: bool
-    email: EmailStr
-    email_verification_token: str
+    email: SkipJsonSchema[EmailStr] = Field(exclude=True, default=None)
+    email_verification_token: SkipJsonSchema[str] = Field(exclude=True, default=None)
     extroversion: int
     introversion: int
     sensing: int
@@ -211,7 +212,8 @@ def verify_email(email: EmailStr, token: str, result_id: str):
 
 @result_router.post("/create", tags=["Results"])
 def create_result(result: Result):
-    result_dict = result.dict()  # Convert Pydantic model to dictionary
+    # Exclude restricted fields from the request body
+    result_dict = result.dict()
     inserted_result = results_collection.insert_one(result_dict)
     return {"id": str(inserted_result.inserted_id), "message": "Result created successfully"}
 
