@@ -1,22 +1,34 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pymongo import MongoClient
 from pydantic import BaseModel, EmailStr
 from bson.objectid import ObjectId
 from decouple import config
 from fastapi.routing import APIRouter
 from fastapi.middleware.cors import CORSMiddleware
+from cryptography.fernet import Fernet
+import smtplib
 
 # Load environment variables
 MONGO_URI = config("MONGO_URI", default="mongodb://localhost:27017/")
 MONGO_DB_NAME = config("MONGO_DB_NAME", default="PasulolCoreAPI")
 MONGO_DB_COLLECTION = config("MONGO_DB_COLLECTION", default="results")
+UI_URL = config("UI_URL", default="https://localhost:4200")
+API_URL = config("API_URL", default="https://localhost:8000")
+# Replace with your SMTP server details
+SMTP_SERVER = config("SMTP_SERVER", default="smtp.example.com")
+SMTP_PORT = config("SMTP_PORT", default=587)
+SMTP_USER = config("SMTP_USER", default="example@gmail.com")
+SMTP_PASSWORD = config("SMTP_PASSWORD", default="your-email-password")
 
 class Result(BaseModel):
     _id: ObjectId
+    accept_email: bool
     email: EmailStr
     email_verification_token: str
     extroversion: int
     introversion: int
+    sensing: int
+    intuition: int
     thinking: int
     feeling: int
     judging: int
@@ -40,11 +52,43 @@ app = FastAPI(swagger_ui_parameters={"syntaxHighlight": False})
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins= [UI_URL],  # Allow requests from the UI URL
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods
     allow_headers=["*"],  # Allow all headers
 )
+
+ENCRYPTION_KEY = config("ENCRYPTION_KEY", default=Fernet.generate_key().decode())
+
+def encrypt_email_verification_token(email: str) -> str:
+    try:
+        fernet = Fernet(ENCRYPTION_KEY.encode())
+        encrypted_token = fernet.encrypt(email.encode())
+        return encrypted_token.decode()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Encryption failed: {str(e)}")
+
+# Email sending function
+def send_verification_email(email: str, token: str, result_id: str):
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+
+            # Create a MIMEText message with UTF-8 encoding
+            msg = MIMEMultipart()
+            msg["Subject"] = "การยืนยันอีเมล"
+            msg["From"] = f"PasulolCore <{SMTP_USER}>"
+            msg["To"] = email
+            body = f"กรุณากดไปที่ลิงก์นี้เพื่อยืนยันอีเมลของคุณให้ผูกไว้กับผลลัพธ์: {API_URL}/result/{result_id}/verify-email?email={email}&token={token}\n\nขอบคุณที่ใช้บริการ PasulolCore!"
+            msg.attach(MIMEText(body, "plain", "utf-8"))
+
+            # Send the email
+            server.sendmail(SMTP_USER, email, msg.as_string())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
 
 # MongoDB setup
 client = MongoClient(MONGO_URI)
@@ -93,19 +137,77 @@ def record_share():
 
 @result_router.get("/all", tags=["Results"])
 def get_all_results():
-    results = list(results_collection.find({}, {"_id": 0}))  # Exclude MongoDB's _id field
+    results = list(results_collection.find({}, {"_id": 0, "email_verification_token": 0}))  # Exclude MongoDB's _id and email_verification_token fields
     return results
 
 @result_router.get("/{result_id}", tags=["Results"])
 def get_result_by_id(result_id: str):
     try:
-        result = results_collection.find_one({"_id": ObjectId(result_id)})
+        result = results_collection.find_one({"_id": ObjectId(result_id)}, {"email_verification_token": 0})  # Exclude email_verification_token field
         if result:
             result["_id"] = str(result["_id"])  # Convert ObjectId to string for JSON serialization
             return result
         raise HTTPException(status_code=404, detail="Result not found")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid ID format")
+
+@result_router.post("/{result_id}/send-verification", tags=["Email Verification"])
+def send_email_verification(email: EmailStr, result_id: str, background_tasks: BackgroundTasks):
+    result = results_collection.find_one({"_id": ObjectId(result_id)})
+    if result.get("accept_email") is False:
+        raise HTTPException(status_code=400, detail="This result no longer accepts email")
+    # Generate the token
+    token = encrypt_email_verification_token(email)
+
+    # Update the email_verification_token in the database
+    result = results_collection.find_one({ "_id": ObjectId(result_id) }, {"email_verification_token": 0})  # Exclude email_verification_token field
+    if result:
+        if not result.get("accept_email", True):
+            raise HTTPException(status_code=400, detail="This result no longer accepts email")
+        results_collection.update_one(
+            {"_id": ObjectId(result_id)},
+            {"$set": {"email_verification_token": token}}
+        )
+    else:
+        raise HTTPException(status_code=404, detail=f"Result with id of {result_id} not found")
+
+    # Send the verification email
+    background_tasks.add_task(send_verification_email, email, token, result_id)
+    return {"message": "Verification email sent successfully"}
+
+@result_router.get("/{result_id}/verify-email", tags=["Email Verification"])
+def verify_email(email: EmailStr, token: str, result_id: str):
+    result = results_collection.find_one({"_id": ObjectId(result_id)})
+    if result.get("accept_email") is False:
+        raise HTTPException(status_code=400, detail="This result no longer accepts email")
+    try:
+        result = results_collection.find_one({"_id": ObjectId(result_id)}, {"email_verification_token": 1})
+        if result.get("email_verification_token") != token:
+            raise HTTPException(status_code=400, detail="Invalid token")
+        results_collection.update_one(
+            {"_id": ObjectId(result_id)},
+            {"$set": {"email": email, "accept_email": False}},
+            upsert=True
+        )
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+
+            # Create a MIMEText message with UTF-8 encoding
+            msg = MIMEMultipart()
+            msg["Subject"] = "ผลลัพธ์ของการทำแบบทดสอบ"
+            msg["From"] = f"PasulolCore <{SMTP_USER}>"
+            msg["To"] = email
+            body = f"การผูกอีเมลเข้ากับผลลัพธ์สำเร็จ\n\nดูผลลัพธ์ของคุณได้ที่: \n{UI_URL}/result/{result_id}\n\nขอบคุณที่ใช้บริการ PasulolCore!"
+            msg.attach(MIMEText(body, "plain", "utf-8"))
+
+            # Send the email
+            server.sendmail(SMTP_USER, email, msg.as_string())
+        return {"message": "Your email successfully linked into your result"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
 
 @result_router.post("/create", tags=["Results"])
 def create_result(result: Result):
@@ -142,6 +244,5 @@ if __name__ == "__main__":
     api_logging_thread.start()
 
     import uvicorn
-    from fastapi.routing import APIRouter
     # Run the FastAPI application
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
