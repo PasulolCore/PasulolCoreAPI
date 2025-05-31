@@ -43,6 +43,9 @@ class Result(BaseModel):
     enneagram_7: int
     enneagram_8: int
     enneagram_9: int
+    headType: int
+    heartType: int
+    gutType: int
 
 class Statistics(BaseModel):
     cumulative_visitors: int
@@ -53,7 +56,7 @@ app = FastAPI(swagger_ui_parameters={"syntaxHighlight": False})
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins= ["*"],  # Allow requests from the UI URL and localhost
+    allow_origins= ["*"],  # Allow requests from the UI URL and localhost # TODO: Don't forget to change this to your actual UI_URL in production
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods
     allow_headers=["*"],  # Allow all headers
@@ -136,15 +139,10 @@ def record_share():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@result_router.get("/all", tags=["Results"])
-def get_all_results():
-    results = list(results_collection.find({}, {"_id": 0, "email_verification_token": 0}))  # Exclude MongoDB's _id and email_verification_token fields
-    return results
-
 @result_router.get("/{result_id}", tags=["Results"])
 def get_result_by_id(result_id: str):
     try:
-        result = results_collection.find_one({"_id": ObjectId(result_id)}, {"email_verification_token": 0})  # Exclude email_verification_token field
+        result = results_collection.find_one({"_id": ObjectId(result_id)}, {"email_verification_token": 0, "email": 0})  # Exclude email_verification_token and email fields
         if result:
             result["_id"] = str(result["_id"])  # Convert ObjectId to string for JSON serialization
             return result
